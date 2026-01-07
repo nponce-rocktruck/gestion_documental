@@ -1,0 +1,30 @@
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# Datos locales
+.env
+*.log
+
+# Tests y artefactos
+.pytest_cache/
+htmlcov/
+.coverage*
+dist/
+build/
+
+
