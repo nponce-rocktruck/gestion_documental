@@ -214,19 +214,24 @@ class PortalVerificationService:
                 
                 # Resolver reCAPTCHA si está presente
                 logger.info("Verificando presencia de reCAPTCHA...")
+                recaptcha_resuelto = False
                 try:
                     # Intentar resolver reCAPTCHA
                     with recaptchav2.SyncSolver(page) as solver:
                         logger.info("Resolviendo reCAPTCHA...")
                         token = solver.solve_recaptcha(wait=True)
                         logger.info("reCAPTCHA resuelto exitosamente")
+                        recaptcha_resuelto = True
                 except Exception as recaptcha_error:
                     # Si no hay reCAPTCHA o ya está resuelto, continuar
                     logger.warning(f"No se pudo resolver reCAPTCHA o no está presente: {recaptcha_error}")
                     # Verificar si el reCAPTCHA ya está marcado
                     try:
                         recaptcha_checked = page.locator(".recaptcha-checkbox-checked").count()
-                        if recaptcha_checked == 0:
+                        if recaptcha_checked > 0:
+                            logger.info("reCAPTCHA ya estaba resuelto")
+                            recaptcha_resuelto = True
+                        else:
                             logger.warning("reCAPTCHA no resuelto, pero continuando...")
                     except:
                         pass
@@ -235,6 +240,28 @@ class PortalVerificationService:
                 logger.info("Haciendo clic en botón Verificar...")
                 boton_verificar = page.locator(self.SELECTORS["boton_verificar"])
                 boton_verificar.wait_for(state="visible", timeout=10000)
+                
+                # Esperar a que el botón esté habilitado (no disabled)
+                logger.info("Esperando a que el botón esté habilitado...")
+                try:
+                    # Esperar hasta 30 segundos a que el botón se habilite
+                    boton_verificar.wait_for(
+                        state="visible",
+                        timeout=30000
+                    )
+                    # Verificar que no esté deshabilitado
+                    is_disabled = boton_verificar.get_attribute("disabled")
+                    if is_disabled is not None:
+                        logger.info("Botón está deshabilitado, esperando a que se habilite...")
+                        # Esperar a que el atributo disabled desaparezca
+                        page.wait_for_function(
+                            "document.querySelector('button:has-text(\\'Verificar\\')')?.disabled === false",
+                            timeout=30000
+                        )
+                        logger.info("Botón habilitado")
+                except Exception as e:
+                    logger.warning(f"Timeout esperando botón habilitado: {e}")
+                
                 boton_verificar.click()
                 
                 # Esperar respuesta (puede ser descarga o mensaje de error)

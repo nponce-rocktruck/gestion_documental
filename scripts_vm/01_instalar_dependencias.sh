@@ -33,7 +33,8 @@ sudo apt-get install -y \
     xdg-utils \
     libu2f-udev \
     libvulkan1 \
-    git
+    git \
+    ffmpeg
 
 echo "=== Dependencias instaladas ==="
 
