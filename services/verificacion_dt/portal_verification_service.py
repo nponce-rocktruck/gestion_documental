@@ -137,7 +137,7 @@ class PortalVerificationService:
                 
                 # Configurar listener para descargas
                 downloaded_file_path = None
-                download_event = {"triggered": False}
+                download_event = {"triggered": False, "link_clicked": False}
                 
                 def handle_download(download):
                     nonlocal downloaded_file_path
@@ -323,32 +323,45 @@ class PortalVerificationService:
                                 "error": None
                             }
                     
-                    # Verificar si hay enlaces de descarga en la página
-                    if waited > 2:  # Esperar un poco antes de buscar enlaces
+                    # Verificar si hay enlaces de descarga en la página (solo una vez)
+                    if waited > 2 and not download_event.get("link_clicked", False):  # Esperar un poco y solo intentar una vez
                         try:
-                            download_links = page.locator("a[href*='.pdf'], a[download], button[onclick*='download']").all()
+                            # Buscar enlaces de descarga más específicos
+                            download_links = page.locator("a[href*='.pdf'], a[download], button[onclick*='download'], a[href*='download'], .download-link, [class*='download']").all()
                             if download_links:
                                 logger.info(f"Se encontraron {len(download_links)} posibles enlaces de descarga")
-                                # Intentar hacer clic en el primer enlace de descarga
+                                # Intentar hacer clic en el primer enlace de descarga visible y habilitado
                                 for link in download_links:
                                     try:
+                                        # Verificar que el enlace sea visible y clickeable
+                                        if not link.is_visible(timeout=1000):
+                                            continue
+                                        
                                         href = link.get_attribute("href")
-                                        if href and (".pdf" in href.lower() or "download" in href.lower()):
-                                            logger.info(f"Intentando descargar desde enlace: {href}")
-                                            with page.expect_download(timeout=10000) as download_info:
-                                                link.click()
-                                            download = download_info.value
-                                            timestamp = int(time.time())
-                                            codigo_limpio = codigo.replace(' ', '_').replace('-', '_')
-                                            filename = f"certificado_{codigo_limpio}_{timestamp}.pdf"
-                                            file_path = Path(self.download_dir) / filename
-                                            download.save_as(str(file_path))
-                                            downloaded_file_path = str(file_path)
-                                            logger.info(f"Archivo descargado desde enlace: {downloaded_file_path}")
-                                            break
+                                        text = link.inner_text()
+                                        logger.info(f"Enlace encontrado - href: {href}, text: {text[:50]}")
+                                        
+                                        # Intentar descargar
+                                        logger.info(f"Intentando hacer clic en enlace de descarga...")
+                                        with page.expect_download(timeout=15000) as download_info:
+                                            link.click()
+                                        download = download_info.value
+                                        timestamp = int(time.time())
+                                        codigo_limpio = codigo.replace(' ', '_').replace('-', '_')
+                                        filename = f"certificado_{codigo_limpio}_{timestamp}.pdf"
+                                        file_path = Path(self.download_dir) / filename
+                                        download.save_as(str(file_path))
+                                        downloaded_file_path = str(file_path)
+                                        download_event["link_clicked"] = True
+                                        logger.info(f"✅ Archivo descargado desde enlace: {downloaded_file_path}")
+                                        break
                                     except Exception as link_error:
                                         logger.debug(f"Error al intentar descargar desde enlace: {link_error}")
                                         continue
+                                
+                                # Marcar que ya intentamos hacer clic
+                                if download_links:
+                                    download_event["link_clicked"] = True
                         except Exception as e:
                             logger.debug(f"Error al buscar enlaces de descarga: {e}")
                     
