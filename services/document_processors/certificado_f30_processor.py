@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .base_processor import BaseDocumentProcessor
 from services.verificacion_dt import PortalVerificationService, PersonaNaturalVerificationService
+from services.verificacion_dt.vm_verification_client import VMVerificationClient
 from services.storage_service import StorageService
 from database.mongodb_connection import get_collection
 from models.document_models import FinalDecision
@@ -270,26 +271,17 @@ class CertificadoF30Processor(BaseDocumentProcessor):
         download_dir = os.getenv("F30_DOWNLOAD_DIR", "downloads/f30")
         os.makedirs(download_dir, exist_ok=True)
         
-        # Ejecutar Playwright en un thread separado para evitar conflicto con asyncio
-        def _ejecutar_verificacion():
-            service = PersonaNaturalVerificationService(
-                headless=False,
-                download_dir=download_dir,
-                max_retries=3
-            )
-            return service.verify_and_download(
+        # Usar cliente de VM para verificación
+        try:
+            client = VMVerificationClient()
+            result = client.verificar_persona_natural(
                 folio_oficina=folio_oficina,
                 folio_anio=folio_anio,
-                folio_numero_consecutivo=folio_numero_consecutivo,
-                codigo_verificacion=codigo_verificacion
+                folio_numero=folio_numero_consecutivo,
+                codigo_verificacion=codigo_verificacion,
+                timeout=180
             )
-        
-        try:
-            # Ejecutar en thread separado
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_ejecutar_verificacion)
-                result = future.result(timeout=180)  # Timeout de 3 minutos
-                return result
+            return result
         except Exception as e:
             logger.error(f"Error al ejecutar verificación en thread separado: {e}", exc_info=True)
             return {
@@ -337,19 +329,14 @@ class CertificadoF30Processor(BaseDocumentProcessor):
             codigo_formateado = " ".join([codigo_formateado[i:i+4] for i in range(0, len(codigo_formateado), 4)])
         
         # Ejecutar Playwright en un thread separado para evitar conflicto con asyncio
-        def _ejecutar_verificacion():
-            service = PortalVerificationService(
-                headless=False,
-                download_dir=download_dir
-            )
-            return service.verify_code(codigo_formateado)
-        
+        # Usar cliente de VM para verificación
         try:
-            # Ejecutar en thread separado
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_ejecutar_verificacion)
-                result = future.result(timeout=240)  # Timeout de 4 minutos (aumentado para Cloud Run)
-                return result
+            client = VMVerificationClient()
+            result = client.verificar_portal_documental(
+                codigo=codigo_formateado,
+                timeout=240
+            )
+            return result
         except Exception as e:
             logger.error(f"Error al ejecutar verificación en thread separado: {e}", exc_info=True)
             return {
