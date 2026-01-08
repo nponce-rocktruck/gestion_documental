@@ -215,6 +215,7 @@ class PortalVerificationService:
                 # Resolver reCAPTCHA si está presente
                 logger.info("Verificando presencia de reCAPTCHA...")
                 recaptcha_resuelto = False
+                recaptcha_error_msg = None
                 try:
                     # Intentar resolver reCAPTCHA
                     with recaptchav2.SyncSolver(page) as solver:
@@ -223,6 +224,7 @@ class PortalVerificationService:
                         logger.info("reCAPTCHA resuelto exitosamente")
                         recaptcha_resuelto = True
                 except Exception as recaptcha_error:
+                    recaptcha_error_msg = str(recaptcha_error)
                     # Si no hay reCAPTCHA o ya está resuelto, continuar
                     logger.warning(f"No se pudo resolver reCAPTCHA o no está presente: {recaptcha_error}")
                     # Verificar si el reCAPTCHA ya está marcado
@@ -232,8 +234,15 @@ class PortalVerificationService:
                             logger.info("reCAPTCHA ya estaba resuelto")
                             recaptcha_resuelto = True
                         else:
+                            # Verificar si es rate limit
+                            if "rate limit" in recaptcha_error_msg.lower():
+                                logger.error("Rate limit de reCAPTCHA excedido. No se puede continuar.")
+                                raise Exception(f"Rate limit de reCAPTCHA excedido. Error: {recaptcha_error_msg}")
                             logger.warning("reCAPTCHA no resuelto, pero continuando...")
-                    except:
+                    except Exception as check_error:
+                        # Si es rate limit, lanzar error
+                        if recaptcha_error_msg and "rate limit" in recaptcha_error_msg.lower():
+                            raise Exception(f"Rate limit de reCAPTCHA excedido. Error: {recaptcha_error_msg}")
                         pass
                 
                 # Hacer clic en el botón Verificar
@@ -253,14 +262,26 @@ class PortalVerificationService:
                     is_disabled = boton_verificar.get_attribute("disabled")
                     if is_disabled is not None:
                         logger.info("Botón está deshabilitado, esperando a que se habilite...")
-                        # Esperar a que el atributo disabled desaparezca
-                        page.wait_for_function(
-                            "document.querySelector('button:has-text(\\'Verificar\\')')?.disabled === false",
-                            timeout=30000
-                        )
-                        logger.info("Botón habilitado")
+                        # Esperar a que el atributo disabled desaparezca usando selector más simple
+                        try:
+                            # Intentar esperar usando el selector por clase
+                            page.wait_for_function(
+                                "() => { const btn = document.querySelector('button.ui.green.medium.icon.right.labeled.button'); return btn && !btn.disabled; }",
+                                timeout=30000
+                            )
+                            logger.info("Botón habilitado")
+                        except Exception as wait_error:
+                            logger.warning(f"Error esperando botón habilitado: {wait_error}")
+                            # Intentar esperar un poco más y verificar manualmente
+                            time.sleep(5)
+                            is_disabled_after = boton_verificar.get_attribute("disabled")
+                            if is_disabled_after is not None:
+                                logger.warning("Botón sigue deshabilitado después de esperar. Posible problema con reCAPTCHA.")
+                                raise Exception("Botón de verificación no se habilitó. Posible problema con reCAPTCHA o rate limit.")
                 except Exception as e:
                     logger.warning(f"Timeout esperando botón habilitado: {e}")
+                    # Si el botón no se habilita, puede ser por rate limit del reCAPTCHA
+                    raise Exception(f"No se pudo habilitar el botón de verificación. Posible rate limit de reCAPTCHA: {str(e)}")
                 
                 boton_verificar.click()
                 
