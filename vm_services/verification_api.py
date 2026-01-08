@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import sys
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 # Agregar el directorio raíz al path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -68,18 +69,31 @@ async def verificar_portal_documental(request: PortalVerificationRequest):
     Verifica un código en el portal documental de la DT
     https://midt.dirtrab.cl/verificadorDocumental
     """
-    try:
-        logger.info(f"Verificando código en portal documental: {request.codigo}")
-        
+    def _ejecutar_verificacion():
+        """Ejecuta la verificación en un thread separado para evitar conflicto con asyncio"""
         service = PortalVerificationService(
             headless=True,
             download_dir=DOWNLOAD_DIR
         )
-        
-        result = service.verify_code(
+        return service.verify_code(
             codigo=request.codigo,
             timeout=request.timeout
         )
+    
+    try:
+        logger.info(f"Verificando código en portal documental: {request.codigo}")
+        
+        # Ejecutar en thread separado para evitar conflicto con asyncio
+        loop = None
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+        except:
+            pass
+        
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_ejecutar_verificacion)
+            result = future.result(timeout=request.timeout + 30)  # Timeout adicional para seguridad
         
         # Convertir Path a string si existe downloaded_file
         if result.get("downloaded_file"):
@@ -98,21 +112,27 @@ async def verificar_persona_natural(request: PersonaNaturalVerificationRequest):
     Verifica y descarga certificado F30 de Persona Natural
     http://tramites.dt.gob.cl/tramitesenlinea/VerificadorTramites/VerificadorTramites.aspx
     """
-    try:
-        logger.info(f"Verificando persona natural - Folio: {request.folio_oficina}-{request.folio_anio}-{request.folio_numero}")
-        
+    def _ejecutar_verificacion():
+        """Ejecuta la verificación en un thread separado para evitar conflicto con asyncio"""
         service = PersonaNaturalVerificationService(
             headless=True,
             download_dir=DOWNLOAD_DIR
         )
-        
-        result = service.verify_and_download(
+        return service.verify_and_download(
             folio_oficina=request.folio_oficina,
             folio_anio=request.folio_anio,
             folio_numero=request.folio_numero,
             codigo_verificacion=request.codigo_verificacion,
             timeout=request.timeout
         )
+    
+    try:
+        logger.info(f"Verificando persona natural - Folio: {request.folio_oficina}-{request.folio_anio}-{request.folio_numero}")
+        
+        # Ejecutar en thread separado para evitar conflicto con asyncio
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_ejecutar_verificacion)
+            result = future.result(timeout=request.timeout + 30)  # Timeout adicional para seguridad
         
         # Convertir Path a string si existe downloaded_file
         if result.get("downloaded_file"):

@@ -193,19 +193,20 @@ class CertificadoF30Processor(BaseDocumentProcessor):
                 f"Descarga automática: {result.get('message', 'Completada')}"
             )
             
-            # Si la descarga falló pero el certificado es válido, marcar para revisión manual
-            if not result.get("success") and result.get("valid"):
+            # Si hay error en la verificación (problema técnico), marcar para revisión manual
+            if not result.get("success"):
                 context["rejection_reasons"].append({
-                    "reason": "Descarga automática fallida - requiere revisión manual",
-                    "details": result.get("error", "Error desconocido"),
-                    "type": "download_error",
-                    "folios_ingresados": result.get("folios_ingresados")
+                    "reason": "Error en verificación automática - requiere revisión manual",
+                    "details": result.get("error", "Error desconocido durante la verificación"),
+                    "type": "verification_error",
+                    "observacion": f"Error técnico durante la verificación: {result.get('error', 'Error desconocido')}. Se requiere revisión manual del documento."
                 })
                 context["final_decision"] = FinalDecision.MANUAL_REVIEW
+                logger.warning(f"Error en verificación automática, marcado para revisión manual: {result.get('error')}")
             elif not result.get("valid"):
-                # Folios no válidos
+                # Certificado no válido (no es error técnico, es que el certificado realmente no es válido)
                 context["rejection_reasons"].append({
-                    "reason": "Folios no válidos en portal oficial",
+                    "reason": "Certificado no válido en portal oficial",
                     "details": result.get("error_message", "Certificado no válido"),
                     "type": "invalid_certificate",
                     "folios_ingresados": result.get("folios_ingresados")
