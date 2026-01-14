@@ -11,6 +11,7 @@ import time
 from typing import Dict, Any, Optional
 from pathlib import Path
 from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext
+from services.proxy_manager import ProxyManager
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class PersonaNaturalVerificationService:
     
     TIPO_TRAMITE_VALUE = "2"  # ANTECEDENTES LABORALES Y PREVISIONALES
     
-    def __init__(self, headless: bool = True, download_dir: Optional[str] = None, max_retries: int = 3):
+    def __init__(self, headless: bool = True, download_dir: Optional[str] = None, max_retries: int = 3, proxy_config: Optional[Dict] = None):
         """
         Inicializa el servicio de verificación
         
@@ -47,11 +48,15 @@ class PersonaNaturalVerificationService:
             headless: Si True, ejecuta el navegador en modo headless
             download_dir: Directorio donde guardar descargas (opcional)
             max_retries: Número máximo de reintentos en caso de error
+            proxy_config: Configuración de proxy (opcional, se obtiene de env si no se proporciona)
         """
         self.headless = headless
         self.download_dir = download_dir or str(Path.cwd() / "downloads")
         self.max_retries = max_retries
         Path(self.download_dir).mkdir(parents=True, exist_ok=True)
+        
+        # Inicializar proxy manager
+        self.proxy_manager = ProxyManager(proxy_config=proxy_config)
     
     def verify_and_download(
         self,
@@ -89,6 +94,37 @@ class PersonaNaturalVerificationService:
         
         logger.info(f"Iniciando verificación de certificado F30 Persona Natural con folios: {folios_ingresados}")
         
+        # Obtener configuración de proxy
+        proxy_config = self.proxy_manager.get_proxy_config()
+        if proxy_config:
+            logger.info(f"Usando proxy: {proxy_config.get('server', 'N/A')}")
+        else:
+            logger.warning("No hay proxy configurado. El acceso puede estar bloqueado.")
+        
+        start_time = time.time()
+        
+        def _add_proxy_usage_to_result(result: Dict[str, Any]) -> Dict[str, Any]:
+            """Agrega información de uso de proxy al resultado"""
+            if proxy_config:
+                elapsed_time = time.time() - start_time
+                estimated_mb = (elapsed_time / 60) * 0.5
+                result["proxy_usage"] = {
+                    "proxy_used": True,
+                    "proxy_server": proxy_config.get("server", "N/A"),
+                    "estimated_mb": round(estimated_mb, 3),
+                    "duration_seconds": round(elapsed_time, 2)
+                }
+                self.proxy_manager.track_usage(
+                    bytes_sent=int(estimated_mb * 1024 * 1024 * 0.3),
+                    bytes_received=int(estimated_mb * 1024 * 1024 * 0.7)
+                )
+            else:
+                result["proxy_usage"] = {
+                    "proxy_used": False,
+                    "estimated_mb": 0.0
+                }
+            return result
+        
         # Reintentos en caso de error
         last_error = None
         for attempt in range(1, self.max_retries + 1):
@@ -104,7 +140,7 @@ class PersonaNaturalVerificationService:
                 )
                 
                 if result["success"]:
-                    return result
+                    return _add_proxy_usage_to_result(result)
                 else:
                     last_error = result.get("error", "Error desconocido")
                     logger.warning(f"Intento {attempt} falló: {last_error}")
@@ -178,11 +214,18 @@ class PersonaNaturalVerificationService:
                     ]
                 )
                 
-                # Crear contexto con descargas habilitadas
-                context = browser.new_context(
-                    accept_downloads=True,
-                    viewport={'width': 1920, 'height': 1080}
-                )
+                # Crear contexto con proxy si está configurado
+                context_options = {
+                    "accept_downloads": True,
+                    "viewport": {'width': 1920, 'height': 1080}
+                }
+                
+                # Agregar proxy si está configurado
+                proxy_config = self.proxy_manager.get_proxy_config()
+                if proxy_config:
+                    context_options["proxy"] = proxy_config
+                
+                context = browser.new_context(**context_options)
                 
                 page = context.new_page()
                 
@@ -290,7 +333,7 @@ class PersonaNaturalVerificationService:
                                     file_size = Path(downloaded_file_path).stat().st_size
                                     if file_size > 0:
                                         logger.info(f"Certificado válido. Archivo descargado: {downloaded_file_path} ({file_size} bytes)")
-                                        return {
+                                        result = {
                                             "success": True,
                                             "valid": True,
                                             "message": "Certificado válido - Documento descargado",
@@ -299,12 +342,13 @@ class PersonaNaturalVerificationService:
                                             "error": None,
                                             "folios_ingresados": folios_ingresados
                                         }
+                                        return result
                                 time.sleep(wait_interval)
                                 waited += wait_interval
                             
                             # Si no se descargó pero el mensaje dice válido
                             if download_event["triggered"]:
-                                return {
+                                result = {
                                     "success": True,
                                     "valid": True,
                                     "message": "Certificado válido (descarga en proceso)",
@@ -313,8 +357,9 @@ class PersonaNaturalVerificationService:
                                     "error": None,
                                     "folios_ingresados": folios_ingresados
                                 }
+                                return result
                             else:
-                                return {
+                                result = {
                                     "success": False,
                                     "valid": True,
                                     "message": "Certificado válido pero no se pudo descargar",
@@ -323,10 +368,11 @@ class PersonaNaturalVerificationService:
                                     "error": "No se detectó descarga después de presionar botón",
                                     "folios_ingresados": folios_ingresados
                                 }
+                                return result
                     else:
                         # Certificado no válido
                         logger.warning(f"Certificado no válido: {portal_message}")
-                        return {
+                        result = {
                             "success": True,
                             "valid": False,
                             "message": "Certificado no válido",

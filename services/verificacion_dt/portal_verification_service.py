@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
 from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext
 from playwright_recaptcha import recaptchav2
+from services.proxy_manager import ProxyManager
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,8 @@ class PortalVerificationService:
     def __init__(
         self, 
         headless: bool = True, 
-        download_dir: Optional[str] = None
+        download_dir: Optional[str] = None,
+        proxy_config: Optional[Dict] = None
     ):
         """
         Inicializa el servicio de verificación
@@ -41,10 +43,15 @@ class PortalVerificationService:
         Args:
             headless: Si True, ejecuta el navegador en modo headless
             download_dir: Directorio donde guardar descargas (opcional)
+            proxy_config: Configuración de proxy (opcional, se obtiene de env si no se proporciona)
         """
         self.headless = headless
         self.download_dir = download_dir or str(Path.cwd() / "downloads")
         Path(self.download_dir).mkdir(parents=True, exist_ok=True)
+        
+        # Inicializar proxy manager
+        self.proxy_manager = ProxyManager(proxy_config=proxy_config)
+        self.proxy_usage = {"bytes_sent": 0, "bytes_received": 0}
     
     def verify_code(
         self, 
@@ -67,6 +74,42 @@ class PortalVerificationService:
             - error: Optional[str] - Mensaje de error si hubo problema
         """
         logger.info(f"Iniciando verificación de código: {codigo}")
+        
+        # Obtener configuración de proxy
+        proxy_config = self.proxy_manager.get_proxy_config()
+        if proxy_config:
+            logger.info(f"Usando proxy: {proxy_config.get('server', 'N/A')}")
+        else:
+            logger.warning("No hay proxy configurado. El acceso puede estar bloqueado.")
+        
+        # Resetear tracking de uso para esta verificación
+        self.proxy_usage = {"bytes_sent": 0, "bytes_received": 0}
+        start_time = time.time()
+        
+        def _add_proxy_usage_to_result(result: Dict[str, Any]) -> Dict[str, Any]:
+            """Agrega información de uso de proxy al resultado"""
+            if proxy_config:
+                # Calcular uso aproximado (basado en tiempo y tamaño de página)
+                elapsed_time = time.time() - start_time
+                # Estimación conservadora: ~500KB por minuto de uso
+                estimated_mb = (elapsed_time / 60) * 0.5
+                result["proxy_usage"] = {
+                    "proxy_used": True,
+                    "proxy_server": proxy_config.get("server", "N/A"),
+                    "estimated_mb": round(estimated_mb, 3),
+                    "duration_seconds": round(elapsed_time, 2)
+                }
+                # Registrar en proxy manager
+                self.proxy_manager.track_usage(
+                    bytes_sent=int(estimated_mb * 1024 * 1024 * 0.3),  # 30% enviado
+                    bytes_received=int(estimated_mb * 1024 * 1024 * 0.7)  # 70% recibido
+                )
+            else:
+                result["proxy_usage"] = {
+                    "proxy_used": False,
+                    "estimated_mb": 0.0
+                }
+            return result
         
         browser = None
         context = None
@@ -119,19 +162,21 @@ class PortalVerificationService:
                     args=browser_args
                 )
                 
-                # Crear contexto con descargas habilitadas
+                # Crear contexto con descargas habilitadas y proxy si está configurado
+                context_options = {"accept_downloads": True}
+                
+                # Agregar proxy si está configurado
+                if proxy_config:
+                    context_options["proxy"] = proxy_config
+                
                 if self.headless:
                     # En modo headless, usar viewport fijo
-                    context = browser.new_context(
-                        accept_downloads=True,
-                        viewport={'width': 1920, 'height': 1080}
-                    )
+                    context_options["viewport"] = {'width': 1920, 'height': 1080}
+                    context = browser.new_context(**context_options)
                 else:
                     # En modo visible, no usar viewport fijo para permitir maximización
-                    context = browser.new_context(
-                        accept_downloads=True,
-                        no_viewport=True  # Permite que la ventana se maximice correctamente
-                    )
+                    context_options["no_viewport"] = True
+                    context = browser.new_context(**context_options)
                 
                 page = context.new_page()
                 
@@ -297,7 +342,7 @@ class PortalVerificationService:
                 if error_visible:
                     portal_message = mensaje_error.inner_text()
                     logger.warning(f"Código inválido: {portal_message}")
-                    return {
+                    result = {
                         "success": True,  # La verificación fue exitosa técnicamente
                         "valid": False,
                         "message": "Código inválido",
@@ -306,6 +351,7 @@ class PortalVerificationService:
                         "downloaded_file": None,
                         "error": None
                     }
+                    return _add_proxy_usage_to_result(result)
                 
                 # Si no hay error, verificar si se descargó un archivo
                 # Esperar hasta 30 segundos por la descarga (aumentado para dar más tiempo)
@@ -335,7 +381,7 @@ class PortalVerificationService:
                             except:
                                 portal_message = None
                             
-                            return {
+                            result = {
                                 "success": True,
                                 "valid": True,
                                 "message": "Código válido - Documento descargado",
@@ -343,6 +389,7 @@ class PortalVerificationService:
                                 "portal_message": portal_message,
                                 "error": None
                             }
+                            return _add_proxy_usage_to_result(result)
                     
                     # Verificar si hay enlaces de descarga en la página (solo una vez)
                     if waited > 2 and not download_event.get("link_clicked", False):  # Esperar un poco y solo intentar una vez
@@ -425,7 +472,7 @@ class PortalVerificationService:
                     file_size = Path(downloaded_file_path).stat().st_size
                     if file_size > 0:
                         logger.info(f"Archivo descargado encontrado: {downloaded_file_path} ({file_size} bytes)")
-                        return {
+                        result = {
                             "success": True,
                             "valid": True,
                             "message": "Código válido - Documento descargado",
@@ -433,6 +480,7 @@ class PortalVerificationService:
                             "portal_message": "Archivo válido",
                             "error": None
                         }
+                        return _add_proxy_usage_to_result(result)
                 
                 # Si no hay error ni descarga, algo inesperado pasó
                 logger.warning("No se detectó ni error ni descarga. Verificando estado de la página...")
@@ -441,7 +489,7 @@ class PortalVerificationService:
                 # Verificar si hay algún mensaje de éxito o estado
                 if "verificado" in page_content.lower() or "válido" in page_content.lower():
                     portal_message = "Archivo válido"
-                    return {
+                    result = {
                         "success": True,
                         "valid": True,
                         "message": "Código válido (sin descarga detectada)",
@@ -449,8 +497,9 @@ class PortalVerificationService:
                         "portal_message": portal_message,
                         "error": None
                     }
+                    return _add_proxy_usage_to_result(result)
                 
-                return {
+                result = {
                     "success": False,
                     "valid": False,
                     "message": "No se pudo determinar el resultado",
@@ -458,10 +507,11 @@ class PortalVerificationService:
                     "portal_message": None,
                     "error": "No se detectó ni error ni descarga después de la verificación"
                 }
+                return _add_proxy_usage_to_result(result)
                 
         except Exception as e:
             logger.error(f"Error durante la verificación: {e}", exc_info=True)
-            return {
+            result = {
                 "success": False,
                 "valid": False,
                 "message": "Error durante la verificación",
@@ -469,6 +519,7 @@ class PortalVerificationService:
                 "portal_message": None,
                 "error": str(e)
             }
+            return _add_proxy_usage_to_result(result)
         
         finally:
             # Cerrar recursos en orden inverso

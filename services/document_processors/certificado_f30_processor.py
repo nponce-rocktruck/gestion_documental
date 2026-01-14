@@ -11,7 +11,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .base_processor import BaseDocumentProcessor
 from services.verificacion_dt import PortalVerificationService, PersonaNaturalVerificationService
-from services.verificacion_dt.vm_verification_client import VMVerificationClient
 from services.storage_service import StorageService
 from database.mongodb_connection import get_collection
 from models.document_models import FinalDecision
@@ -330,14 +329,19 @@ class CertificadoF30Processor(BaseDocumentProcessor):
             codigo_formateado = " ".join([codigo_formateado[i:i+4] for i in range(0, len(codigo_formateado), 4)])
         
         # Ejecutar Playwright en un thread separado para evitar conflicto con asyncio
-        # Usar cliente de VM para verificación
-        try:
-            client = VMVerificationClient()
-            result = client.verificar_portal_documental(
-                codigo=codigo_formateado,
-                timeout=240
+        def _ejecutar_verificacion():
+            service = PortalVerificationService(
+                headless=True,
+                download_dir=download_dir
             )
-            return result
+            return service.verify_code(codigo_formateado, timeout=240)
+        
+        try:
+            # Ejecutar en thread separado
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_ejecutar_verificacion)
+                result = future.result(timeout=240)  # Timeout de 4 minutos
+                return result
         except Exception as e:
             logger.error(f"Error al ejecutar verificación en thread separado: {e}", exc_info=True)
             return {
@@ -375,6 +379,11 @@ class CertificadoF30Processor(BaseDocumentProcessor):
             # Guardar explícitamente el resultado de la comparación en un campo separado
             if download_info.get("data_comparison"):
                 download_data["data_comparison"] = download_info["data_comparison"]
+            
+            # Guardar información de uso de proxy si está disponible
+            if result.get("proxy_usage"):
+                download_data["proxy_usage"] = result["proxy_usage"]
+                download_data["proxy_usage_mb"] = result["proxy_usage"].get("estimated_mb", 0.0)
             
             collection.update_one(
                 {"document_id": document_id},
