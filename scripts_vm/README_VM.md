@@ -15,6 +15,8 @@ cd ~/api-documentos
 git pull
 
 source venv/bin/activate
+pip install -r requirements_vm.txt
+
 python test_portal_verification.py "ZRQWWEEJKOWQ"
 
 ------

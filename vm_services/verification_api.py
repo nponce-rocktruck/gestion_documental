@@ -32,6 +32,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Silenciar logs de selenium-wire (muy verbosos)
+logging.getLogger("seleniumwire.handler").setLevel(logging.WARNING)
+logging.getLogger("seleniumwire.backend").setLevel(logging.WARNING)
+
 # Configuración desde variables de entorno
 OXY_USER = os.getenv("OXY_USER", "conirarra_FyqF8")
 OXY_PASS = os.getenv("OXY_PASS", "Clemente_2011")
@@ -303,7 +307,7 @@ def verificar_portal_documental_sync(codigo: str) -> Dict[str, Any]:
         }}, 2000);
         """
         
-        resultado = driver.execute_async_script(script_verificacion, timeout=60)
+        resultado = driver.execute_async_script(script_verificacion)
         
         if resultado and resultado.get("valid"):
             pdf_base64 = resultado.get("pdf")
