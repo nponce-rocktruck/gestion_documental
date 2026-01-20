@@ -10,7 +10,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .base_processor import BaseDocumentProcessor
-from services.verificacion_dt import PortalVerificationService, PersonaNaturalVerificationService
+from services.verificacion_dt.vm_verification_client import VMVerificationClient
 from services.storage_service import StorageService
 from database.mongodb_connection import get_collection
 from models.document_models import FinalDecision
@@ -279,6 +279,7 @@ class CertificadoF30Processor(BaseDocumentProcessor):
                 folio_anio=folio_anio,
                 folio_numero=folio_numero_consecutivo,
                 codigo_verificacion=codigo_verificacion,
+                document_id=document_id,
                 timeout=180
             )
             return result
@@ -328,20 +329,14 @@ class CertificadoF30Processor(BaseDocumentProcessor):
         if " " not in codigo_certificado and len(codigo_formateado) >= 8:
             codigo_formateado = " ".join([codigo_formateado[i:i+4] for i in range(0, len(codigo_formateado), 4)])
         
-        # Ejecutar Playwright en un thread separado para evitar conflicto con asyncio
-        def _ejecutar_verificacion():
-            service = PortalVerificationService(
-                headless=True,
-                download_dir=download_dir
-            )
-            return service.verify_code(codigo_formateado, timeout=240)
-        
+        # Usar cliente de VM para verificación
         try:
-            # Ejecutar en thread separado
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_ejecutar_verificacion)
-                result = future.result(timeout=240)  # Timeout de 4 minutos
-                return result
+            client = VMVerificationClient()
+            result = client.verificar_portal_documental(
+                codigo=codigo_formateado,
+                document_id=document_id
+            )
+            return result
         except Exception as e:
             logger.error(f"Error al ejecutar verificación en thread separado: {e}", exc_info=True)
             return {

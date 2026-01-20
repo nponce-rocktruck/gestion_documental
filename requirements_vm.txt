@@ -1,0 +1,18 @@
+# Dependencias para la VM - API de Verificación
+# Estas dependencias SOLO se instalan en la VM, NO en Cloud Run
+# Basado en project_dt/requirements.txt
+
+# FastAPI para la API
+fastapi>=0.115.0
+uvicorn[standard]==0.25.0
+pydantic>=2.5.0
+
+# Selenium y automatización (versiones exactas de project_dt)
+2captcha-python==2.0.2
+requests==2.32.5
+selenium==4.40.0
+selenium-stealth==1.0.6
+selenium-wire==5.1.0
+undetected-chromedriver==3.5.5
+blinker==1.7.0
+

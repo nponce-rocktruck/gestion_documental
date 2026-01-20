@@ -181,7 +181,7 @@ class PersonaNaturalVerificationService:
         
         try:
             with sync_playwright() as playwright:
-                # Configurar navegador con descargas y argumentos para Cloud Run
+                # Configurar navegador con descargas y argumentos para Cloud Run (anti-detección)
                 browser = playwright.chromium.launch(
                     headless=True,  # Siempre headless en Cloud Run
                     args=[
@@ -206,7 +206,10 @@ class PersonaNaturalVerificationService:
                         '--force-color-profile=srgb',
                         '--metrics-recording-only',
                         '--no-first-run',
-                        '--enable-automation',
+                        # ANTI-DETECCIÓN: Eliminado --enable-automation (detectado por Google)
+                        '--disable-blink-features=AutomationControlled',  # Oculta que es automatizado
+                        '--exclude-switches=enable-automation',  # Elimina flags de automatización
+                        '--disable-features=IsolateOrigins,site-per-process',  # Evita detección avanzada
                         '--enable-features=NetworkService,NetworkServiceInProcess',
                         '--password-store=basic',
                         '--use-mock-keychain',
@@ -225,9 +228,54 @@ class PersonaNaturalVerificationService:
                 if proxy_config:
                     context_options["proxy"] = proxy_config
                 
+                # User-Agent realista (Chrome en Windows, actualizado)
+                context_options["user_agent"] = (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
+                
+                # Headers adicionales para parecer más real
+                context_options["extra_http_headers"] = {
+                    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+                    "Accept-Encoding": "gzip, deflate, br",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                    "Connection": "keep-alive",
+                    "Upgrade-Insecure-Requests": "1",
+                    "Sec-Fetch-Dest": "document",
+                    "Sec-Fetch-Mode": "navigate",
+                    "Sec-Fetch-Site": "none",
+                    "Cache-Control": "max-age=0",
+                }
+                
                 context = browser.new_context(**context_options)
                 
                 page = context.new_page()
+                
+                # ANTI-DETECCIÓN: Ejecutar JavaScript para ocultar webdriver
+                page.add_init_script("""
+                    // Eliminar propiedad webdriver
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    });
+                    
+                    // Sobrescribir plugins para parecer real
+                    Object.defineProperty(navigator, 'plugins', {
+                        get: () => [1, 2, 3, 4, 5]
+                    });
+                    
+                    // Sobrescribir languages
+                    Object.defineProperty(navigator, 'languages', {
+                        get: () => ['es-ES', 'es', 'en-US', 'en']
+                    });
+                    
+                    // Sobrescribir permissions
+                    const originalQuery = window.navigator.permissions.query;
+                    window.navigator.permissions.query = (parameters) => (
+                        parameters.name === 'notifications' ?
+                            Promise.resolve({ state: Notification.permission }) :
+                            originalQuery(parameters)
+                    );
+                """)
                 
                 # Configurar listener para descargas
                 downloaded_file_path = None
