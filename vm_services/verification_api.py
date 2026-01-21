@@ -250,64 +250,44 @@ def verificar_portal_documental_sync(codigo: str) -> Dict[str, Any]:
         inyectar_token_captcha(driver, token)
         time.sleep(2)  # Esperar a que procese el token
         
-        # Ingresar código y verificar
+        # Verificar código directamente desde la API (como en project_dt)
         logger.info(f"Verificando código: {codigo}")
         codigo_sin_espacios = codigo.replace(" ", "")
         
-        # Script para ingresar código, hacer click y obtener PDF
-        script_verificacion = f"""
+        # Script para obtener PDF directamente desde la API (después de resolver reCAPTCHA)
+        script_fetch = f"""
         var callback = arguments[arguments.length - 1];
-        var codigo = "{codigo_sin_espacios}";
+        var folio = "{codigo_sin_espacios}";
         
-        // Ingresar código
-        var inputCodigo = document.querySelector('#codigoVerificacionId, input[name="codigoVerificacion"]');
-        if (inputCodigo) {{
-            inputCodigo.value = codigo;
-            inputCodigo.dispatchEvent(new Event('input', {{ bubbles: true }}));
-        }}
-        
-        // Esperar y hacer click en botón
-        setTimeout(function() {{
-            var btn = document.querySelector('button.ui.green.medium.icon.right.labeled.button');
-            if (btn && !btn.disabled) {{
-                btn.click();
-                
-                // Esperar respuesta
-                setTimeout(function() {{
-                    // Intentar obtener PDF desde la API
-                    fetch("https://proxy-sso-portalinstitucional.api.dirtrab.cl/api/GestorDocumental/GetArchivoSerieDocumentalByIdentificadorSerieDocumental?identificadorSerieDocumental=" + codigo + "&isFirmadoRequerido=false", {{
-                        "method": "GET",
-                        "headers": {{
-                            "Accept": "*/*",
-                            "Origin": "https://midt.dirtrab.cl",
-                            "Referer": "https://midt.dirtrab.cl/"
-                        }}
-                    }})
-                    .then(r => {{
-                        if (!r.ok) {{
-                            callback({{valid: false, error: "Código inválido", pdf: null}});
-                            return;
-                        }}
-                        return r.json();
-                    }})
-                    .then(data => {{
-                        if (data && data.ArchivoBase64 && data.ArchivoBase64.length > 100) {{
-                            callback({{valid: true, pdf: data.ArchivoBase64, error: null}});
-                        }} else {{
-                            callback({{valid: false, error: "Código inválido - no hay archivo", pdf: null}});
-                        }}
-                    }})
-                    .catch(err => {{
-                        callback({{valid: false, error: "Error en fetch: " + err.message, pdf: null}});
-                    }});
-                }}, 3000);
-            }} else {{
-                callback({{valid: false, error: "Botón no disponible", pdf: null}});
+        fetch("https://proxy-sso-portalinstitucional.api.dirtrab.cl/api/GestorDocumental/GetArchivoSerieDocumentalByIdentificadorSerieDocumental?identificadorSerieDocumental=" + folio + "&isFirmadoRequerido=false", {{
+            "method": "GET",
+            "headers": {{
+                "Accept": "*/*",
+                "Origin": "https://midt.dirtrab.cl",
+                "Referer": "https://midt.dirtrab.cl/"
             }}
-        }}, 2000);
+        }})
+        .then(r => {{
+            if (!r.ok) {{
+                callback({{valid: false, error: "Código inválido - HTTP " + r.status, pdf: null}});
+                return;
+            }}
+            return r.json();
+        }})
+        .then(data => {{
+            if (data && data.ArchivoBase64 && data.ArchivoBase64.length > 100) {{
+                callback({{valid: true, pdf: data.ArchivoBase64, error: null}});
+            }} else {{
+                callback({{valid: false, error: "Código inválido - no hay archivo", pdf: null}});
+            }}
+        }})
+        .catch(err => {{
+            callback({{valid: false, error: "Error en fetch: " + err.message, pdf: null}});
+        }});
         """
         
-        resultado = driver.execute_async_script(script_verificacion)
+        logger.info("Ejecutando fetch a API para obtener PDF...")
+        resultado = driver.execute_async_script(script_fetch)
         
         if resultado and resultado.get("valid"):
             pdf_base64 = resultado.get("pdf")
