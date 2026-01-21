@@ -622,6 +622,63 @@ class GCPOCRService:
                 file_id = file_url.split("/file/d/")[1].split("/")[0]
                 return f"https://drive.google.com/uc?export=download&id={file_id}"
         return file_url
+    
+    def _download_from_gcs(self, gcs_url: str) -> bytes:
+        """
+        Descarga un archivo desde Google Cloud Storage usando el cliente de storage
+        
+        Args:
+            gcs_url: URL completa del archivo en GCS (ej: https://storage.googleapis.com/bucket-name/path/to/file.pdf)
+            
+        Returns:
+            bytes: Contenido del archivo
+        """
+        try:
+            # Parsear la URL de GCS
+            # Formato: https://storage.googleapis.com/bucket-name/path/to/file.pdf
+            url_parts = gcs_url.replace("https://storage.googleapis.com/", "").split("/", 1)
+            if len(url_parts) != 2:
+                raise ValueError(f"URL de GCS inválida: {gcs_url}")
+            
+            bucket_name = url_parts[0]
+            blob_path = url_parts[1]
+            
+            logger.info(f"Descargando desde GCS: bucket={bucket_name}, path={blob_path}")
+            
+            # Inicializar cliente de storage
+            if storage is None:
+                raise ValueError("google.cloud.storage no está instalado")
+            
+            # Usar las mismas credenciales que para Vision API
+            if self.credentials_path:
+                credentials = service_account.Credentials.from_service_account_file(
+                    self.credentials_path
+                )
+                storage_client = storage.Client(credentials=credentials, project=self.project_id)
+            elif self.credentials_json:
+                import json
+                credentials_info = json.loads(self.credentials_json)
+                credentials = service_account.Credentials.from_service_account_info(credentials_info)
+                storage_client = storage.Client(credentials=credentials, project=self.project_id)
+            else:
+                # Usar credenciales por defecto (Application Default Credentials)
+                storage_client = storage.Client(project=self.project_id)
+            
+            # Descargar el archivo
+            bucket = storage_client.bucket(bucket_name)
+            blob = bucket.blob(blob_path)
+            
+            if not blob.exists():
+                raise ValueError(f"El archivo no existe en GCS: {gcs_url}")
+            
+            content = blob.download_as_bytes()
+            logger.info(f"Archivo descargado exitosamente desde GCS: {len(content)} bytes")
+            
+            return content
+            
+        except Exception as e:
+            logger.error(f"Error al descargar desde GCS {gcs_url}: {e}", exc_info=True)
+            raise ValueError(f"Error al descargar archivo desde GCS: {str(e)}")
 
 
 class FallbackOCRService:

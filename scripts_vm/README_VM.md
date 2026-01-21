@@ -24,6 +24,13 @@ cd ~/api-documentos
 git pull  # Actualizar código
 source venv/bin/activate
 python vm_services/verification_api.py
+
+cd ~/api-documentos
+git pull
+source venv/bin/activate
+python vm_services/verification_api.py
+
+
 -----
 
 cd ~/api-documentos
