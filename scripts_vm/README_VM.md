@@ -1,6 +1,6 @@
 desde la terminal para abrir la mauina virtual
 
-cd ""C:\Users\pc\Documents\GitHub\gestion_documental""
+cd "C:\Users\pc\Documents\GitHub\gestion_documental"
 
 gcloud compute ssh mv-2-southamerica --zone=southamerica-west1-b
 

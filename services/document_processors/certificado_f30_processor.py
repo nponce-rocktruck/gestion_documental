@@ -127,6 +127,11 @@ class CertificadoF30Processor(BaseDocumentProcessor):
                     download_info["uploaded_at"] = datetime.utcnow()
                     logger.info(f"Archivo subido exitosamente a la nube: {upload_result.get('public_url')}")
                     
+                    # Actualizar downloaded_file en result con la URL de GCS en lugar de la ruta local
+                    cloud_url = upload_result.get("public_url")
+                    result["downloaded_file"] = cloud_url
+                    logger.info(f"Actualizado downloaded_file a URL de GCS: {cloud_url}")
+                    
                     # Eliminar archivo local después de subirlo exitosamente a la nube
                     try:
                         if os.path.exists(downloaded_file_path):
@@ -139,7 +144,6 @@ class CertificadoF30Processor(BaseDocumentProcessor):
                         # No fallar el proceso si no se puede eliminar el archivo local
                     
                     # Extraer datos del documento descargado usando la URL de la nube
-                    cloud_url = upload_result.get("public_url")
                     logger.info(f"Extrayendo datos del documento descargado desde URL de la nube: {cloud_url}")
                     try:
                         extracted_data_downloaded = self._extraer_datos_documento_descargado(
