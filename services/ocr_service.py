@@ -26,10 +26,11 @@ except Exception:  # pragma: no cover
     pytesseract = None
 
 try:
-    from google.cloud import vision
+    from google.cloud import vision, storage
     from google.oauth2 import service_account
 except Exception:  # pragma: no cover
     vision = None
+    storage = None
     service_account = None
 
 logger = logging.getLogger(__name__)
@@ -356,9 +357,13 @@ class GCPOCRService:
                 logger.info(f"URL convertida para descarga: {download_url}")
             
             # Descargar el archivo
-            response = requests.get(download_url, timeout=60)
-            response.raise_for_status()
-            content = response.content
+            # Si es una URL de Google Cloud Storage, usar la librería de GCS
+            if download_url.startswith("https://storage.googleapis.com/"):
+                content = self._download_from_gcs(download_url)
+            else:
+                response = requests.get(download_url, timeout=60)
+                response.raise_for_status()
+                content = response.content
             
             # Validar que el contenido no esté vacío
             if not content:
@@ -554,6 +559,12 @@ class GCPOCRService:
             if not parsed.scheme or not parsed.netloc:
                 logger.error(f"URL inválida: {file_url}")
                 return False
+            
+            # Si es URL de GCS, no validar con HEAD (puede dar 403 pero el archivo existe)
+            if file_url.startswith("https://storage.googleapis.com/"):
+                # Validar formato de URL
+                url_parts = file_url.replace("https://storage.googleapis.com/", "").split("/", 1)
+                return len(url_parts) == 2
             
             # Verificar que sea accesible y obtener información del contenido
             response = requests.head(file_url, timeout=10, allow_redirects=True)

@@ -287,7 +287,19 @@ def verificar_portal_documental_sync(codigo: str) -> Dict[str, Any]:
         """
         
         logger.info("Ejecutando fetch a API para obtener PDF...")
-        resultado = driver.execute_async_script(script_fetch)
+        try:
+            # Ejecutar con timeout explícito
+            resultado = driver.execute_async_script(script_fetch)
+            logger.info(f"Resultado del script: {type(resultado)}, keys: {resultado.keys() if resultado else None}")
+        except Exception as script_error:
+            logger.error(f"Error ejecutando script JavaScript: {script_error}", exc_info=True)
+            return {
+                "success": False,
+                "valid": False,
+                "message": "Error ejecutando script de verificación",
+                "error": str(script_error),
+                "pdf_base64": None
+            }
         
         if resultado and resultado.get("valid"):
             pdf_base64 = resultado.get("pdf")
