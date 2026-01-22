@@ -1,0 +1,27 @@
+[Unit]
+Description=VM Verification API Service
+After=network.target
+
+[Service]
+Type=simple
+User=pc
+Group=pc
+WorkingDirectory=/home/pc/api-documentos
+Environment="PATH=/home/pc/api-documentos/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/pc/api-documentos/venv/bin/python /home/pc/api-documentos/vm_services/verification_api.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vm-verification-api
+
+# Variables de entorno (ajustar según necesidad)
+Environment="OXY_USER=conirarra_FyqF8"
+Environment="OXY_PASS=Clemente_2011"
+Environment="OXY_HOST=unblock.oxylabs.io"
+Environment="OXY_PORT=60000"
+Environment="API_KEY_2CAPTCHA=e716e4f00d5e2225bcd8ed2a04981fe3"
+
+[Install]
+WantedBy=multi-user.target
+
